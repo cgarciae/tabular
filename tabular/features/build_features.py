@@ -18,19 +18,32 @@ class DateTransformer(BaseEstimator, TransformerMixin):
         )
 
     def fit(self, X: pd.DataFrame, y=None) -> "DateTransformer":
-        return self
-
-    def transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
-
         df = pd.DataFrame(index=X.index)
-        cols = X.columns
 
-        for col in cols:
+        for col in X.columns:
             df[f"{col}_year"] = X[col].dt.year
             df[f"{col}_dayofyear"] = X[col].dt.day
             df[f"{col}_monthofyear"] = X[col].dt.month
             df[f"{col}_dayofweek"] = X[col].dt.dayofweek
             df[f"{col}_weekofyear"] = X[col].dt.isocalendar().week
+
+        self.output_features_ = df.columns
+        self.encoder_.fit(df)
+
+        return self
+
+    def transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
+
+        df = pd.DataFrame(index=X.index)
+
+        for col in X.columns:
+            df[f"{col}_year"] = X[col].dt.year
+            df[f"{col}_dayofyear"] = X[col].dt.day
+            df[f"{col}_monthofyear"] = X[col].dt.month
+            df[f"{col}_dayofweek"] = X[col].dt.dayofweek
+            df[f"{col}_weekofyear"] = X[col].dt.isocalendar().week
+
+        df[df.columns] = self.encoder_.transform(df) + 1
 
         return df
 
@@ -87,6 +100,15 @@ class GenericTransformer(BaseEstimator, TransformerMixin):
         self.date_transformer_.fit(X[self.date_features_])
         self.label_transformer_.fit(X[self.labels])
 
+        # numeric missing
+        indicator = self.numeric_transformer_.steps[1][1].indicator_
+        if indicator is not None:
+            self.numeric_missing_ = [
+                f"{self.numeric_features_[i]}_missing" for i in indicator.features_
+            ]
+        else:
+            self.numeric_missing_ = []
+
         return self
 
     def transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
@@ -94,19 +116,11 @@ class GenericTransformer(BaseEstimator, TransformerMixin):
         cols = X.columns
 
         # numerical
-        indicator = self.numeric_transformer_.steps[1][1].indicator_
-
-        if indicator is not None:
-            missing_cols = [
-                f"{self.numeric_features_[i]}_missing" for i in indicator.features_
-            ]
-        else:
-            missing_cols = []
-
-        numeric_cols = self.numeric_features_ + missing_cols
+        numeric_cols = self.numeric_features_ + self.numeric_missing_
         df[numeric_cols] = self.numeric_transformer_.transform(
             X[self.numeric_features_]
         )
+        df[self.numeric_missing_] = df[self.numeric_missing_].astype(int)
 
         # categorical
         df[self.categoric_features_] = (
@@ -122,6 +136,13 @@ class GenericTransformer(BaseEstimator, TransformerMixin):
             df[self.labels] = self.label_transformer_.transform(X[self.labels])
 
         return df
+
+    def get_metadata(self) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
+
+        metadata = {}
+
+        metadata.update({col: dict(kind="continous") for col in self.numeric_features_})
+        metadata.update({col: dict(kind="binary") for col in self.numeric_missing_})
 
 
 def main(
