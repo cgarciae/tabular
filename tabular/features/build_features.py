@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import pickle
 import typing as tp
@@ -7,7 +8,12 @@ import numpy as np
 import typer
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OrdinalEncoder, LabelEncoder
+from sklearn.preprocessing import (
+    StandardScaler,
+    OrdinalEncoder,
+    LabelEncoder,
+    MinMaxScaler,
+)
 from sklearn.impute import SimpleImputer
 
 
@@ -58,7 +64,7 @@ class GenericTransformer(BaseEstimator, TransformerMixin):
         self.label_transformer_ = LabelEncoder()
         self.numeric_transformer_ = Pipeline(
             [
-                ("scale", StandardScaler()),
+                ("scale", MinMaxScaler()),
                 ("inpute", SimpleImputer(strategy="median", add_indicator=True)),
             ]
         )
@@ -141,8 +147,61 @@ class GenericTransformer(BaseEstimator, TransformerMixin):
 
         metadata = {}
 
-        metadata.update({col: dict(kind="continous") for col in self.numeric_features_})
-        metadata.update({col: dict(kind="binary") for col in self.numeric_missing_})
+        metadata.update(
+            {col: dict(kind="continuous") for col in self.numeric_features_}
+        )
+        metadata.update(
+            {col: dict(kind="categorical", size=2) for col in self.numeric_missing_}
+        )
+        metadata.update(
+            {
+                col: dict(
+                    kind="categorical",
+                    size=len(categories) + 1,
+                )
+                for col, categories in zip(
+                    self.categoric_features_,
+                    self.categoric_transformer_.steps[1][1].categories_,
+                )
+            }
+        )
+        if len(self.labels) == 1:
+            metadata.update(
+                {
+                    col: dict(
+                        kind="categorical",
+                        size=len(self.label_transformer_.classes_),
+                    )
+                    for col in self.labels
+                }
+            )
+        else:
+            metadata.update(
+                {
+                    col: dict(
+                        kind="categorical",
+                        size=len(categories),
+                    )
+                    for col, categories in zip(
+                        self.labels,
+                        self.label_transformer_.classes_,
+                    )
+                }
+            )
+        metadata.update(
+            {
+                col: dict(
+                    kind="categorical",
+                    size=len(categories) + 1,
+                )
+                for col, categories in zip(
+                    self.date_transformer_.output_features_,
+                    self.date_transformer_.encoder_.categories_,
+                )
+            }
+        )
+
+        return metadata
 
 
 def main(
@@ -171,12 +230,14 @@ def main(
 
     df_train: pd.DataFrame = transformer.fit_transform(df_train)
     df_test = transformer.transform(df_test)
+    metadata = transformer.get_metadata()
 
     output_path.mkdir(parents=True, exist_ok=True)
 
     df_train.to_csv(output_path / "train.csv", index=False)
     df_test.to_csv(output_path / "test.csv", index=False)
     (output_path / "transformer.pkl").write_bytes(pickle.dumps(transformer))
+    (output_path / "metadata.json").write_text(json.dumps(metadata, indent=4))
 
 
 if __name__ == "__main__":
