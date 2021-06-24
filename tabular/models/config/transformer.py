@@ -111,10 +111,13 @@ def get_model(
             # elegy.regularizers.GlobalL2(0.005),
         ],
         metrics=elegy.metrics.BinaryAccuracy(),
-        optimizer=optax.adamw(1e-4),
+        optimizer=optax.adamw(3e-5),
     )
 
-    model.init(X_train, y_train)
-    model.summary(X_train)
+    model.init(
+        jax.tree_map(lambda x: x[:batch_size], X_train),
+        jax.tree_map(lambda x: x[:batch_size], y_train),
+    )
+    model.summary(jax.tree_map(lambda x: x[:batch_size], X_train), depth=1)
 
     return model
